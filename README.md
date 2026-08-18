@@ -48,4 +48,4 @@ dotnet run --project src/GifMaker
 
 ## 许可证
 
-未指定（如需要可自行添加 MIT 等许可）。
+[MIT](LICENSE)
