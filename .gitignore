@@ -1,0 +1,19 @@
+# 构建产物
+bin/
+obj/
+
+# 本地配置文件（含本机路径）
+*.user
+settings.json
+
+# IDE
+.vs/
+.vscode/
+*.suo
+*.userosscache
+
+# 应用运行时下载的 ffmpeg
+ffmpeg/
+
+# 日志
+*.log

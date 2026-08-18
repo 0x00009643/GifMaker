@@ -1,0 +1,299 @@
+<Window x:Class="GifMaker.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:GifMaker.Controls"
+        Title="GifMaker - 视频转GIF" Height="780" Width="1240"
+        WindowStartupLocation="CenterScreen" Background="#F5F5F7">
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+    </Window.Resources>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- 工具栏 -->
+        <Border Grid.Row="0" Background="White" BorderBrush="#E0E0E0" BorderThickness="0,0,0,1" Padding="10,8">
+            <DockPanel>
+                <Button x:Name="OpenButton" DockPanel.Dock="Left" Padding="14,6" Content="打开视频…"
+                        FontWeight="SemiBold" Click="OnOpenVideo" IsEnabled="{Binding FfmpegReady}"/>
+                <Button x:Name="OpenFolderButton" DockPanel.Dock="Left" Margin="8,0,0,0" Padding="10,6"
+                        Content="打开输出文件夹" Click="OnOpenOutputFolder"/>
+                <Button x:Name="FfmpegButton" DockPanel.Dock="Right" Padding="10,6"
+                        Content="设置 ffmpeg…" Click="OnBrowseFfmpeg"
+                        ToolTip="修改 ffmpeg / ffprobe 路径（需与 ffprobe.exe 同目录）"/>
+                <TextBlock Text="{Binding InfoText}" VerticalAlignment="Center" Margin="16,0,0,0"
+                           Foreground="#555" TextTrimming="CharacterEllipsis"/>
+            </DockPanel>
+        </Border>
+
+        <!-- 主体 -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="340"/>
+            </Grid.ColumnDefinitions>
+
+            <!-- 预览区 -->
+            <Border Grid.Column="0" Margin="10" Background="Black" BorderBrush="#D8D8D8" BorderThickness="1"
+                    CornerRadius="4">
+                <Grid x:Name="PreviewHost" Background="Black" ClipToBounds="True">
+                    <Grid.RowDefinitions>
+                        <RowDefinition/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Grid x:Name="PreviewBox" Grid.Row="0" Grid.Column="0" HorizontalAlignment="Center" VerticalAlignment="Center" Cursor="Cross">
+                        <Grid.RenderTransform>
+                            <TransformGroup>
+                                <ScaleTransform x:Name="ZoomScale" ScaleX="1" ScaleY="1"/>
+                                <TranslateTransform x:Name="ZoomTranslate" X="0" Y="0"/>
+                            </TransformGroup>
+                        </Grid.RenderTransform>
+                        <MediaElement x:Name="Player" LoadedBehavior="Manual" ScrubbingEnabled="True"
+                                      Stretch="Uniform" StretchDirection="Both"/>
+                        <Image x:Name="StepImage" Stretch="Uniform" Visibility="Collapsed"
+                               Source="{Binding CurrentPreview}"/>
+                    </Grid>
+
+                    <controls:CropOverlay x:Name="CropOverlay" HorizontalAlignment="Center" VerticalAlignment="Center"
+                                          Crop="{Binding Crop}"
+                                          LockedRatio="{Binding LockedCropRatio}"
+                                          Visibility="{Binding IsLoaded, Converter={StaticResource BoolToVis}}"/>
+
+                    <Border Background="#99000000" CornerRadius="3" HorizontalAlignment="Left"
+                            VerticalAlignment="Top" Margin="8" Padding="8,3" Visibility="{Binding IsLoaded, Converter={StaticResource BoolToVis}}">
+                        <StackPanel>
+                            <TextBlock Text="{Binding FrameLabel}" Foreground="White" FontFamily="Consolas"/>
+                            <TextBlock Text="{Binding CurrentTimeText}" Foreground="#CCC" FontFamily="Consolas"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border x:Name="ZoomLabel" Background="#99000000" CornerRadius="3" HorizontalAlignment="Right"
+                            VerticalAlignment="Top" Margin="8" Padding="8,3" Visibility="Collapsed"
+                            ToolTip="双击画面重置缩放">
+                        <TextBlock x:Name="ZoomLabelText" Foreground="White" FontFamily="Consolas"/>
+                    </Border>
+
+                    <ScrollBar x:Name="HScroll" Orientation="Horizontal" Height="14" Grid.Row="1" Grid.ColumnSpan="2"
+                               HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Visibility="Collapsed"/>
+                    <ScrollBar x:Name="VScroll" Orientation="Vertical" Width="14" Grid.Row="0" Grid.Column="1"
+                               HorizontalAlignment="Stretch" VerticalAlignment="Stretch" Visibility="Collapsed"/>
+
+                    <!-- 加载/探测进度 -->
+                    <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Visibility="{Binding IsProbing, Converter={StaticResource BoolToVis}}">
+                        <ProgressBar Width="320" Height="8" Maximum="1" Value="{Binding ProbeProgress}"
+                                     IsIndeterminate="{Binding ProbeIndeterminate}"/>
+                        <TextBlock Text="{Binding ProbeStatusText}" Foreground="#AAA" Margin="0,10,0,0"
+                                   HorizontalAlignment="Center"/>
+                        <Button Content="取消" Margin="0,10,0,0" Padding="12,4" Click="OnCancelProbe"
+                                HorizontalAlignment="Center"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <!-- 右侧面板 -->
+            <ScrollViewer Grid.Column="1" VerticalScrollBarVisibility="Auto" Margin="0,10,10,10">
+                <StackPanel>
+                    <GroupBox Header="时长裁剪" Padding="8">
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="起点帧" VerticalAlignment="Center" Margin="0,2,6,2"/>
+                                <TextBox Grid.Column="1" x:Name="StartFrameBox" Width="110" HorizontalAlignment="Left"
+                                         Margin="0,2" LostFocus="OnStartFrameLostFocus"/>
+                                <TextBlock Grid.Column="2" Text="{Binding StartTimeText}" VerticalAlignment="Center"
+                                           Margin="8,2,0,2" FontFamily="Consolas" Foreground="#666"/>
+                            </Grid>
+                            <Grid Margin="0,4,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="终点帧" VerticalAlignment="Center" Margin="0,2,6,2"/>
+                                <TextBox Grid.Column="1" x:Name="EndFrameBox" Width="110" HorizontalAlignment="Left"
+                                         Margin="0,2" LostFocus="OnEndFrameLostFocus"/>
+                                <TextBlock Grid.Column="2" Text="{Binding EndTimeText}" VerticalAlignment="Center"
+                                           Margin="8,2,0,2" FontFamily="Consolas" Foreground="#666"/>
+                            </Grid>
+                            <UniformGrid Columns="2" Margin="0,6,0,0">
+                                <Button Content="设为起点（当前帧）" Margin="0,0,4,0" Padding="4" Click="OnSetTrimStart"/>
+                                <Button Content="设为终点（当前帧）" Margin="4,0,0,0" Padding="4" Click="OnSetTrimEnd"/>
+                            </UniformGrid>
+                        </StackPanel>
+                    </GroupBox>
+
+                    <GroupBox Header="画面裁剪" Padding="8" Margin="0,8,0,0">
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="比例" VerticalAlignment="Center" Margin="0,2,6,2"/>
+                                <ComboBox Grid.Column="1" x:Name="RatioCombo" HorizontalAlignment="Left" Width="140"
+                                          SelectionChanged="OnRatioChanged"/>
+                            </Grid>
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="CropXBox" Margin="0,0,4,0" LostFocus="OnCropPxLostFocus" ToolTip="X"/>
+                                <TextBox Grid.Column="1" x:Name="CropYBox" Margin="0,0,4,0" LostFocus="OnCropPxLostFocus" ToolTip="Y"/>
+                                <TextBox Grid.Column="2" x:Name="CropWBox" Margin="0,0,4,0" LostFocus="OnCropPxLostFocus" ToolTip="宽"/>
+                                <TextBox Grid.Column="3" x:Name="CropHBox" LostFocus="OnCropPxLostFocus" ToolTip="高"/>
+                            </Grid>
+                            <TextBlock Margin="0,4,0,0" Foreground="#888" FontSize="11"
+                                       Text="裁剪坐标：X/Y/宽/高（像素，相对显示画面）"/>
+                            <Button Content="重置裁剪" Margin="0,8,0,0" Padding="4" Click="OnResetCrop"/>
+                        </StackPanel>
+                    </GroupBox>
+
+                    <GroupBox Header="导出设置" Padding="8" Margin="0,8,0,0">
+                        <StackPanel>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="分辨率" VerticalAlignment="Center" Margin="0,2,6,2"/>
+                                <ComboBox Grid.Column="1" x:Name="ResCombo" SelectionChanged="OnResChanged"/>
+                            </Grid>
+                            <Grid Margin="0,4,0,0" Visibility="{Binding IsCustomResolution, Converter={StaticResource BoolToVis}}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="宽度(px)" VerticalAlignment="Center" Margin="0,2,6,2"/>
+                                <TextBox Grid.Column="1" x:Name="CustomWidthBox" Width="110" HorizontalAlignment="Left"
+                                         LostFocus="OnCustomWidthLostFocus"/>
+                            </Grid>
+                            <Grid Margin="0,6,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="帧率" VerticalAlignment="Center" Margin="0,2,6,2"/>
+                                <ComboBox Grid.Column="1" x:Name="FpsCombo" Width="140" HorizontalAlignment="Left"
+                                          SelectionChanged="OnFpsChanged"/>
+                            </Grid>
+                            <Grid Margin="0,4,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="颜色数" VerticalAlignment="Center" Margin="0,2,6,2"/>
+                                <ComboBox Grid.Column="1" x:Name="ColorCombo" Width="140" HorizontalAlignment="Left"
+                                          SelectionChanged="OnColorsChanged"/>
+                            </Grid>
+                            <CheckBox Content="抖动（减少色带）" Margin="0,8,0,0" IsChecked="{Binding Dithering}"/>
+                            <CheckBox Content="无限循环" Margin="0,4,0,0" IsChecked="{Binding InfiniteLoop}"/>
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBox x:Name="OutputFolderBox" Margin="0,0,6,0" Text="{Binding OutputFolder, UpdateSourceTrigger=LostFocus}"/>
+                                <Button Grid.Column="1" Content="浏览…" Padding="10,4" Click="OnBrowseOutputFolder"/>
+                            </Grid>
+                            <Border Background="#F0F0FF" CornerRadius="3" Margin="0,10,0,0" Padding="8,6">
+                                <TextBlock Text="{Binding ExportEstimateText}" Foreground="#333" TextWrapping="Wrap"/>
+                            </Border>
+                            <Button x:Name="ExportButton" Content="开始导出" Margin="0,10,0,0" Padding="8"
+                                    FontWeight="SemiBold" Click="OnExport" IsEnabled="{Binding CanExport}"/>
+                            <ProgressBar x:Name="ExportProgress" Height="8" Margin="0,8,0,0" Maximum="1"
+                                         Value="{Binding ExportProgress}" Visibility="Collapsed"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0"
+                                        Visibility="{Binding IsExporting, Converter={StaticResource BoolToVis}}">
+                                <TextBlock Text="导出中…" Foreground="#555" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                <Button Content="取消" Padding="10,3" Click="OnCancelExport"/>
+                            </StackPanel>
+                            <Button x:Name="ResultOpenButton" Content="导出完成 - 打开所在文件夹" Margin="0,8,0,0" Padding="8"
+                                    Visibility="Collapsed" Click="OnOpenResultFolder"/>
+                        </StackPanel>
+                    </GroupBox>
+
+                    <!-- ffmpeg 缺失提示 -->
+                    <Border Background="#FFF4E5" CornerRadius="3" Margin="0,10,0,0" Padding="10,8"
+                            Visibility="{Binding IsFfmpegMissing, Converter={StaticResource BoolToVis}}">
+                        <StackPanel>
+                            <TextBlock Text="未找到 ffmpeg / ffprobe" FontWeight="Bold" Foreground="#8A4B00"/>
+                            <TextBlock Text="可自动下载，或手动选择 ffmpeg.exe（需与其同目录的 ffprobe.exe）："
+                                       TextWrapping="Wrap" Foreground="#8A4B00" Margin="0,4,0,0" FontSize="12"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <Button Content="{Binding DownloadButtonText}" Padding="8" Click="OnDownloadFfmpeg"
+                                        IsEnabled="{Binding CanClickDownload}"/>
+                                <Button Content="手动选择 ffmpeg.exe…" Margin="8,0,0,0" Padding="8" Click="OnBrowseFfmpeg"/>
+                            </StackPanel>
+                            <ProgressBar Height="6" Margin="0,8,0,0" Maximum="1" Value="{Binding DownloadProgress}"
+                                         Visibility="{Binding IsDownloading, Converter={StaticResource BoolToVis}}"/>
+                            <TextBlock Text="下载约 80MB，完成后自动配置" Foreground="#8A4B00" FontSize="11" Margin="0,6,0,0"
+                                       Visibility="{Binding IsDownloading, Converter={StaticResource BoolToVis}}"/>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+        </Grid>
+
+        <!-- 时间轴 -->
+        <Border Grid.Row="2" Background="White" BorderBrush="#E0E0E0" BorderThickness="0,1,0,0" Padding="10,8">
+            <StackPanel>
+                <controls:TimelineControl x:Name="Timeline" Height="72" Margin="0,0,0,8"
+                                          FrameCount="{Binding FrameCount}"
+                                          StartFrame="{Binding StartFrame, Mode=TwoWay}"
+                                          EndFrame="{Binding EndFrame, Mode=TwoWay}"
+                                          CurrentFrame="{Binding CurrentFrame, Mode=TwoWay}"/>
+                <DockPanel>
+                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                        <Button x:Name="PrevFrameButton" Width="40" Content="◀" Padding="0,4"
+                                Click="OnPrevFrame" ToolTip="上一帧"/>
+                        <Button x:Name="PlayStopButton" Width="56" Margin="6,0" Padding="0,4"
+                                Click="OnPlayPause" ToolTip="播放/暂停">
+                            <TextBlock x:Name="PlayGlyph2" FontFamily="Segoe MDL2 Assets" FontSize="16" Text="&#xE768;"/>
+                        </Button>
+                        <Button x:Name="NextFrameButton" Width="40" Content="▶" Padding="0,4"
+                                Click="OnNextFrame" ToolTip="下一帧"/>
+                        <CheckBox Content="循环播放" Margin="10,0,0,0" VerticalAlignment="Center"
+                                  IsChecked="{Binding LoopPlayback}"
+                                  ToolTip="仅播放起点~终点区间；勾选后自动重复播放该区间"/>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                        <Button Content="设为起点" Margin="6,0" Padding="10,4" Click="OnSetTrimStart"/>
+                        <Button Content="设为终点" Margin="0,0,0,0" Padding="10,4" Click="OnSetTrimEnd"/>
+                    </StackPanel>
+                    <TextBlock Text="{Binding FrameLabel}" VerticalAlignment="Center" Foreground="#444" FontFamily="Consolas"/>
+                </DockPanel>
+            </StackPanel>
+        </Border>
+
+        <!-- 状态栏 -->
+        <StatusBar Grid.Row="3" Background="#EFEFF2">
+            <StatusBarItem>
+                <TextBlock x:Name="FfmpegStatusText" Text="{Binding FfmpegStatus}" Foreground="#555"/>
+            </StatusBarItem>
+            <Separator/>
+            <StatusBarItem>
+                <TextBlock Text="{Binding FfmpegPathDisplay}" Foreground="#777" TextTrimming="CharacterEllipsis"
+                           MaxWidth="520" ToolTip="{Binding FfmpegPathDisplay}"/>
+            </StatusBarItem>
+            <Separator/>
+            <StatusBarItem>
+                <TextBlock Text="{Binding Status}" Foreground="#333"/>
+            </StatusBarItem>
+        </StatusBar>
+    </Grid>
+</Window>
