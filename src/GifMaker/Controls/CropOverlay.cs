@@ -41,6 +41,8 @@ public sealed class CropOverlay : FrameworkElement
 
     private Handle _active = Handle.None;
 
+    private double _dragOffX, _dragOffY;
+
     public CropOverlay()
     {
         IsHitTestVisible = true;
@@ -56,6 +58,9 @@ public sealed class CropOverlay : FrameworkElement
         double px = Crop.Left * w, py = Crop.Top * h;
         double pw = Crop.Width * w, ph = Crop.Height * h;
         double cx = px + pw / 2, cy = py + ph / 2;
+
+        // 全区域透明填充：保证挖孔区域（裁剪框内部）也参与命中测试
+        dc.DrawRectangle(Brushes.Transparent, null, new Rect(0, 0, w, h));
 
         // 遮罩（全屏挖孔）
         var geo = new CombinedGeometry(
@@ -99,6 +104,12 @@ public sealed class CropOverlay : FrameworkElement
         if (e.LeftButton != MouseButtonState.Pressed) return;
         var pos = e.GetPosition(this);
         _active = HitTest(pos.X, pos.Y);
+        if (_active == Handle.Move)
+        {
+            double w = Math.Max(ActualWidth, 1), h = Math.Max(ActualHeight, 1);
+            _dragOffX = pos.X / w - Crop.Left;
+            _dragOffY = pos.Y / h - Crop.Top;
+        }
         if (_active != Handle.None)
         {
             CaptureMouse();
@@ -138,52 +149,96 @@ public sealed class CropOverlay : FrameworkElement
         e.Handled = true;
     }
 
-    /// <summary>以对侧边缘/角为锚点缩放，支持比例锁定（锚点不动）。</summary>
-    private static CropRect ResizeWithAnchor(CropRect r, Handle h, double nx, double ny, double aspect)
+/// <summary>
+/// 以对侧边缘/角为锚点缩放，支持比例锁定（锚点不动）。
+/// 活动边跟随鼠标（可双向拖动，平滑收缩到最小），越过锚点后贴锚点保持最小尺寸，不翻转。
+/// </summary>
+private static CropRect ResizeWithAnchor(CropRect r, Handle h, double nx, double ny, double aspect)
+{
+    (double ax, double ay, int sx, int sy) = h switch
     {
-        double ax, ay;
-        switch (h)
+        Handle.TL => (r.Right, r.Bottom, -1, -1),
+        Handle.TR => (r.Left, r.Bottom, 1, -1),
+        Handle.BL => (r.Right, r.Top, -1, 1),
+        Handle.BR => (r.Left, r.Top, 1, 1),
+        Handle.Left => (r.Right, (r.Top + r.Bottom) / 2, -1, 0),
+        Handle.Right => (r.Left, (r.Top + r.Bottom) / 2, 1, 0),
+        Handle.Top => ((r.Left + r.Right) / 2, r.Bottom, 0, -1),
+        Handle.Bottom => ((r.Left + r.Right) / 2, r.Top, 0, 1),
+        _ => (r.Left, r.Top, 0, 0)
+    };
+
+    // 活动边位置（跟随鼠标，夹在锚点与画面边界之间）
+    double l, t, r1, b1;
+    if (sx > 0) { l = ax; r1 = Math.Clamp(nx, ax + MinNorm, 1); }
+    else if (sx < 0) { r1 = ax; l = Math.Clamp(nx, 0, ax - MinNorm); }
+    else { l = ax - r.Width / 2; r1 = ax + r.Width / 2; }
+
+    if (sy > 0) { t = ay; b1 = Math.Clamp(ny, ay + MinNorm, 1); }
+    else if (sy < 0) { b1 = ay; t = Math.Clamp(ny, 0, ay - MinNorm); }
+    else { t = ay - r.Height / 2; b1 = ay + r.Height / 2; }
+
+    if (!double.IsNaN(aspect))
+    {
+        double maxCw = sx > 0 ? 1 - ax : (sx < 0 ? ax : Math.Min(ax, 1 - ax) * 2);
+        double maxCh = sy > 0 ? 1 - ay : (sy < 0 ? ay : Math.Min(ay, 1 - ay) * 2);
+        if (sx != 0 && sy != 0)
         {
-            case Handle.TL: ax = r.Right; ay = r.Bottom; break;
-            case Handle.TR: ax = r.Left; ay = r.Bottom; break;
-            case Handle.BL: ax = r.Right; ay = r.Top; break;
-            case Handle.BR: ax = r.Left; ay = r.Top; break;
-            case Handle.Left: ax = r.Right; ay = (r.Top + r.Bottom) / 2; break;
-            case Handle.Right: ax = r.Left; ay = (r.Top + r.Bottom) / 2; break;
-            case Handle.Top: ax = (r.Left + r.Right) / 2; ay = r.Bottom; break;
-            case Handle.Bottom: ax = (r.Left + r.Right) / 2; ay = r.Top; break;
-            default: return r;
+            double cwM = sx > 0 ? r1 - ax : ax - l;
+            double chM = sy > 0 ? b1 - ay : ay - t;
+            double cw2 = Math.Max(cwM, chM * aspect);
+            double ch2 = cw2 / aspect;
+            if (cw2 > maxCw || ch2 > maxCh)
+            {
+                double s = Math.Min(maxCw / cw2, maxCh / ch2);
+                cw2 *= s;
+                ch2 *= s;
+            }
+            cw2 = Math.Max(cw2, MinNorm);
+            ch2 = Math.Max(ch2, MinNorm);
+            if (sx > 0) r1 = ax + cw2; else l = ax - cw2;
+            if (sy > 0) b1 = ay + ch2; else t = ay - ch2;
         }
-
-        double dx = nx - ax, dy = ny - ay;
-        double cw = Math.Abs(dx), ch = Math.Abs(dy);
-
-        if (!double.IsNaN(aspect))
+        else if (sx != 0)
         {
-            if (ch * aspect >= cw) cw = ch * aspect;
-            else ch = cw / aspect;
+            double cwM = sx > 0 ? r1 - ax : ax - l;
+            double chM = Math.Max(r.Height, cwM / aspect);
+            if (chM > maxCh)
+            {
+                chM = maxCh;
+                cwM = chM * aspect;
+            }
+            if (sx > 0) r1 = ax + cwM; else l = ax - cwM;
+            t = ay - chM / 2;
+            b1 = ay + chM / 2;
         }
-        cw = Math.Max(cw, MinNorm);
-        ch = Math.Max(ch, MinNorm);
-
-        double l = dx >= 0 ? ax : ax - cw;
-        double t = dy >= 0 ? ay : ay - ch;
-        double r1 = l + cw, b1 = t + ch;
-
-        // 越界收缩回可容纳范围
-        if (l < 0) { r1 -= l; l = 0; }
-        if (t < 0) { b1 -= t; t = 0; }
-        if (r1 > 1) { l -= r1 - 1; r1 = 1; }
-        if (b1 > 1) { t -= b1 - 1; b1 = 1; }
-
-        return new CropRect(l, t, r1, b1);
+        else
+        {
+            double chM = sy > 0 ? b1 - ay : ay - t;
+            double cwM = Math.Max(r.Width, chM * aspect);
+            if (cwM > maxCw)
+            {
+                cwM = maxCw;
+                chM = cwM / aspect;
+            }
+            if (sy > 0) b1 = ay + chM; else t = ay - chM;
+            l = ax - cwM / 2;
+            r1 = ax + cwM / 2;
+        }
     }
 
-    private static CropRect MoveRect(CropRect r, double nx, double ny)
+    l = Math.Clamp(l, 0, 1);
+    t = Math.Clamp(t, 0, 1);
+    r1 = Math.Clamp(r1, 0, 1);
+    b1 = Math.Clamp(b1, 0, 1);
+    return new CropRect(l, t, r1, b1);
+}
+
+    private CropRect MoveRect(CropRect r, double nx, double ny)
     {
         double cw = r.Right - r.Left, ch = r.Bottom - r.Top;
-        double l = Math.Clamp(nx - cw / 2, 0, 1 - cw);
-        double t = Math.Clamp(ny - ch / 2, 0, 1 - ch);
+        double l = Math.Clamp(nx - _dragOffX, 0, 1 - cw);
+        double t = Math.Clamp(ny - _dragOffY, 0, 1 - ch);
         return new CropRect(l, t, l + cw, t + ch);
     }
 
@@ -194,17 +249,18 @@ public sealed class CropOverlay : FrameworkElement
         double pw = Crop.Width * w, ph = Crop.Height * h;
         double cx = px + pw / 2, cy = py + ph / 2;
 
-        bool near(double a, double b) => Math.Abs(a - b) <= SlopPx;
+        const double r = 12;
+        bool near(double a, double b) => Math.Abs(a - b) <= r;
 
         if (near(x, px) && near(y, py)) return Handle.TL;
         if (near(x, px + pw) && near(y, py)) return Handle.TR;
         if (near(x, px) && near(y, py + ph)) return Handle.BL;
         if (near(x, px + pw) && near(y, py + ph)) return Handle.BR;
-        if (near(x, px) && y >= py && y <= py + ph) return Handle.Left;
-        if (near(x, px + pw) && y >= py && y <= py + ph) return Handle.Right;
-        if (near(y, py) && x >= px && x <= px + pw) return Handle.Top;
-        if (near(y, py + ph) && x >= px && x <= px + pw) return Handle.Bottom;
-        if (x >= px && x <= px + pw && y >= py && y <= py + ph) return Handle.Move;
+        if (near(x, px) && near(y, cy)) return Handle.Left;
+        if (near(x, px + pw) && near(y, cy)) return Handle.Right;
+        if (near(x, cx) && near(y, py)) return Handle.Top;
+        if (near(x, cx) && near(y, py + ph)) return Handle.Bottom;
+        if (x >= px - r && x <= px + pw + r && y >= py - r && y <= py + ph + r) return Handle.Move;
         return Handle.None;
     }
 

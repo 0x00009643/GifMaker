@@ -29,6 +29,7 @@ public partial class MainViewModel : ObservableObject
         _outputFolder = _settings.OutputFolder;
         _customWidth = 480;
         _fps = _settings.LastFps;
+        _customFps = _settings.LastCustomFps > 0 ? _settings.LastCustomFps : 15;
         _colors = _settings.LastColors;
         _dithering = _settings.LastDithering;
         _infiniteLoop = _settings.LastInfiniteLoop;
@@ -172,9 +173,14 @@ public partial class MainViewModel : ObservableObject
     public int DisplayHeight => Info?.DisplayHeight ?? 0;
     public double ViewAspect => DisplayHeight > 0 ? DisplayWidth / (double)DisplayHeight : 1.0;
 
-    [ObservableProperty] private string _cropRatioChoice = "Free";
+    [ObservableProperty] private string _cropRatioChoice = "自由";
 
-    public string[] CropRatioChoices { get; } = { "Free", "1:1", "4:3", "16:9", "Source" };
+    public string[] CropRatioChoices { get; } = { "自由", "1:1", "4:3", "16:9", "原比例", "自定义" };
+
+    [ObservableProperty] private int _customRatioW = 16;
+    [ObservableProperty] private int _customRatioH = 9;
+
+    public bool IsCustomRatio => CropRatioChoice == "自定义";
 
     public bool IsCustomResolution => ResolutionMode == ResolutionMode.Custom;
 
@@ -183,7 +189,8 @@ public partial class MainViewModel : ObservableObject
         "1:1" => 1.0,
         "4:3" => 4.0 / 3.0,
         "16:9" => 16.0 / 9.0,
-        "Source" => ViewAspect,
+        "原比例" => ViewAspect,
+        "自定义" when CustomRatioH > 0 => CustomRatioW / (double)CustomRatioH,
         _ => null
     };
 
@@ -193,6 +200,7 @@ public partial class MainViewModel : ObservableObject
     [ObservableProperty] private ResolutionMode _resolutionMode;
     [ObservableProperty] private int _customWidth;
     [ObservableProperty] private int _fps;
+    [ObservableProperty] private int _customFps = 15;
     [ObservableProperty] private int _colors;
     [ObservableProperty] private bool _dithering;
     [ObservableProperty] private bool _infiniteLoop;
@@ -204,7 +212,14 @@ public partial class MainViewModel : ObservableObject
     public string[] FpsChoices { get; } = { "0", "8", "10", "12", "15", "20", "24", "30" };
     public string[] ColorChoices { get; } = { "64", "128", "192", "256" };
 
-    public int EffectiveFps => Fps > 0 ? Fps : (int)Math.Max(1, Math.Round(SourceFps));
+    public int EffectiveFps => Fps switch
+    {
+        -1 => Math.Clamp(CustomFps, 1, 60),
+        0 => (int)Math.Max(1, Math.Round(SourceFps)),
+        _ => Fps
+    };
+
+    public bool IsCustomFps => Fps == -1;
 
     public string ExportEstimateText
     {
@@ -409,7 +424,7 @@ public partial class MainViewModel : ObservableObject
     public void ResetCrop()
     {
         Crop = CropRect.Full;
-        CropRatioChoice = "Free";
+        CropRatioChoice = "自由";
     }
 
     public void ApplyCropRatio(string choice)
@@ -483,6 +498,7 @@ public partial class MainViewModel : ObservableObject
         _settings.OutputFolder = OutputFolder;
         _settings.LastMaxWidth = ExportSettings.WidthFor(ResolutionMode, CustomWidth);
         _settings.LastFps = Fps;
+        _settings.LastCustomFps = CustomFps;
         _settings.LastColors = Colors;
         _settings.LastDithering = Dithering;
         _settings.LastInfiniteLoop = InfiniteLoop;
@@ -534,8 +550,6 @@ public partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(ExportEstimateText));
     }
 
-    partial void OnCropRatioChoiceChanged(string value) { OnPropertyChanged(nameof(LockedCropRatio)); }
-
     partial void OnResolutionModeChanged(ResolutionMode value)
     {
         OnPropertyChanged(nameof(ExportEstimateText));
@@ -546,12 +560,35 @@ public partial class MainViewModel : ObservableObject
     partial void OnFpsChanged(int value)
     {
         OnPropertyChanged(nameof(EffectiveFps));
+        OnPropertyChanged(nameof(IsCustomFps));
+        OnPropertyChanged(nameof(ExportEstimateText));
+    }
+
+    partial void OnCustomFpsChanged(int value)
+    {
+        OnPropertyChanged(nameof(EffectiveFps));
         OnPropertyChanged(nameof(ExportEstimateText));
     }
 
     partial void OnCustomWidthChanged(int value)
     {
         OnPropertyChanged(nameof(ExportEstimateText));
+    }
+
+    partial void OnCropRatioChoiceChanged(string value)
+    {
+        OnPropertyChanged(nameof(IsCustomRatio));
+        OnPropertyChanged(nameof(LockedCropRatio));
+    }
+
+    partial void OnCustomRatioWChanged(int value)
+    {
+        OnPropertyChanged(nameof(LockedCropRatio));
+    }
+
+    partial void OnCustomRatioHChanged(int value)
+    {
+        OnPropertyChanged(nameof(LockedCropRatio));
     }
 
     partial void OnOutputFolderChanged(string value) { }

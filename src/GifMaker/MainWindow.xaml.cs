@@ -21,7 +21,7 @@ public partial class MainWindow : Window
     private double _zoom = 1.0;
     private double _zoomX, _zoomY;
 
-    private static readonly int[] FpsValues = { 0, 8, 10, 12, 15, 20, 24, 30 };
+    private static readonly int[] FpsValues = { 0, 8, 10, 12, 15, 20, 24, 30, -1 };
     private static readonly int[] ColorValues = { 64, 128, 192, 256 };
 
     public MainWindow()
@@ -86,7 +86,7 @@ public partial class MainWindow : Window
 
         RatioCombo.ItemsSource = _vm.CropRatioChoices;
         ResCombo.ItemsSource = new[] { "原尺寸", "480", "640", "720", "自定义" };
-        FpsCombo.ItemsSource = new[] { "原帧率", "8 fps", "10 fps", "12 fps", "15 fps", "20 fps", "24 fps", "30 fps" };
+        FpsCombo.ItemsSource = new[] { "原帧率", "8 fps", "10 fps", "12 fps", "15 fps", "20 fps", "24 fps", "30 fps", "自定义" };
         ColorCombo.ItemsSource = ColorValues.Select(c => c + " 色").ToArray();
 
         Loaded += (_, _) => SyncCombos();
@@ -152,7 +152,9 @@ public partial class MainWindow : Window
                 break;
             case nameof(MainViewModel.CropRatioChoice):
                 if (RatioCombo != null)
-                    RatioCombo.SelectedIndex = Math.Max(0, Array.IndexOf(_vm.CropRatioChoices, _vm.CropRatioChoice));
+RatioCombo.SelectedIndex = Math.Max(0, Array.IndexOf(_vm.CropRatioChoices, _vm.CropRatioChoice));
+        CustomRatioWBox.Text = _vm.CustomRatioW.ToString();
+        CustomRatioHBox.Text = _vm.CustomRatioH.ToString();
                 break;
             case nameof(MainViewModel.IsExporting):
                 ExportProgress.Visibility = _vm.IsExporting ? Visibility.Visible : Visibility.Collapsed;
@@ -415,6 +417,18 @@ public partial class MainWindow : Window
             _vm.ApplyCropRatio(choice);
     }
 
+    private void OnCustomRatioLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (TryParseInt(CustomRatioWBox.Text, out int w))
+            _vm.CustomRatioW = Math.Clamp(w, 1, 99);
+        if (TryParseInt(CustomRatioHBox.Text, out int h))
+            _vm.CustomRatioH = Math.Clamp(h, 1, 99);
+        CustomRatioWBox.Text = _vm.CustomRatioW.ToString();
+        CustomRatioHBox.Text = _vm.CustomRatioH.ToString();
+        if (_vm.IsLoaded && _vm.IsCustomRatio)
+            _vm.ApplyCropRatio("自定义");
+    }
+
     private void OnCropPxLostFocus(object sender, RoutedEventArgs e)
     {
         if (!_vm.IsLoaded) return;
@@ -471,6 +485,13 @@ public partial class MainWindow : Window
         CustomWidthBox.Text = _vm.CustomWidth.ToString();
     }
 
+    private void OnCustomFpsLostFocus(object sender, RoutedEventArgs e)
+    {
+        if (TryParseInt(CustomFpsBox.Text, out int v))
+            _vm.CustomFps = Math.Clamp(v, 1, 60);
+        CustomFpsBox.Text = _vm.CustomFps.ToString();
+    }
+
     private void OnFpsChanged(object sender, SelectionChangedEventArgs e)
     {
         if (FpsCombo.SelectedIndex >= 0 && FpsCombo.SelectedIndex < FpsValues.Length)
@@ -499,6 +520,7 @@ public partial class MainWindow : Window
         };
         RatioCombo.SelectedIndex = Math.Max(0, Array.IndexOf(_vm.CropRatioChoices, _vm.CropRatioChoice));
         CustomWidthBox.Text = _vm.CustomWidth.ToString();
+        CustomFpsBox.Text = _vm.CustomFps.ToString();
         SyncFrameBoxes();
         SyncCropBoxes();
     }

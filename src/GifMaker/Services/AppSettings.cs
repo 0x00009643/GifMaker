@@ -23,6 +23,8 @@ public sealed class AppSettings
 
     public int LastMaxWidth { get; set; }
     public int LastFps { get; set; } = 15;
+
+    public int LastCustomFps { get; set; } = 15;
     public int LastColors { get; set; } = 256;
     public bool LastDithering { get; set; } = true;
     public bool LastInfiniteLoop { get; set; } = true;
